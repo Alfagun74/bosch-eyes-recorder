@@ -4,7 +4,7 @@ LABEL org.opencontainers.image.title="Bosch Eyes Recorder" \
       org.opencontainers.image.description="Open-source recorder and web UI (live view + rolling recordings) for Bosch Eyes Gen1 cameras" \
       org.opencontainers.image.source="https://github.com/Alfagun74/bosch-eyes-recorder" \
       org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.version="1.2.0"
+      org.opencontainers.image.version="1.3.0"
 
 ARG TARGETARCH
 ARG MEDIAMTX_VERSION=1.21.1

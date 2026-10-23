@@ -1,6 +1,6 @@
 [project]
 name = "bosch-eyes-recorder"
-version = "1.2.0"
+version = "1.3.0"
 description = "Docker/CapRover recorder and web UI for Bosch Eyes Gen1 cameras"
 readme = "README.md"
 requires-python = ">=3.11"

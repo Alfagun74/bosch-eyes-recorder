@@ -32,6 +32,7 @@ recording with rolling retention (default: 7 days) in a Docker volume.
 - [First login](#first-login)
 - [Configuration](#configuration)
 - [Live view](#live-view)
+- [Browse recorded footage](#browse-recorded-footage)
 - [Recordings and retention](#recordings-and-retention)
 - [Storage sizing](#storage-sizing)
 - [Security](#security)
@@ -73,6 +74,9 @@ video on your own server.
   the app. The app exchanges it (PKCE) and stores a rotating refresh token.
 - **Continuous recording** – MediaMTX records the camera's original H.264/AAC
   tracks as fMP4 segments; no ffmpeg, no transcoding.
+- **Browse past recordings in the UI** – list segments by day, play them in the
+  browser (seekable, with audio), play continuously from any point, or download
+  them.
 - **Rolling retention** – default 7 days, configurable per day/segment;
   additional guards for maximum storage and minimum free disk space.
 - **Automatic credential renewal** – refreshes camera credentials every ~20
@@ -283,6 +287,41 @@ The stream is muted by default because browsers block autoplay with sound;
 use the player's volume control. If the stream is not ready yet, the dashboard
 automatically refreshes until the camera source is up.
 
+## Browse recorded footage
+
+Open **`/recordings`** (linked from the dashboard) to browse the recordings
+that are still inside the retention window:
+
+- Segments are grouped by day and sorted newest first.
+- **▶** plays a single segment in the embedded HTML5 player.
+- **"Ab hier"** plays that segment and continues with the following (newer)
+  segments in chronological order — useful to watch a contiguous period.
+- **Download** saves a segment as-is. Segments can also be concatenated
+  losslessly with `ffmpeg -f concat`.
+- Only finalized segments are listed; the segment currently being written
+  appears after `SEGMENT_MINUTES` (the last few seconds are intentionally
+  hidden so you never see an incomplete file).
+- Playback is the original camera stream (H.264/AAC, no transcoding) and
+  supports seeking via HTTP Range requests.
+
+There is also a JSON view at `/api/recordings` (for scripts/monitoring), and
+media files are served under an unguessable token path
+(`/media/<token>/eyes/….mp4`) so `<video>` elements work even with Basic auth.
+
+## Endpoints
+
+| Path | Purpose |
+|---|---|
+| `/` | Dashboard with live player and status |
+| `/login` | Bosch browser login or refresh-token fallback |
+| `/oauth/start`, `/oauth/finish` | Login flow endpoints |
+| `/recordings` | Recording browser (list, player, download) |
+| `/api/recordings` | Recording list as JSON |
+| `/media/<token>/…mp4` | Segment playback (HTTP Range supported) |
+| `/hls/<token>/eyes/index.m3u8` | Live HLS stream (used by the player) |
+| `/healthz` | Healthcheck for Docker/CapRover |
+| `/status` | Full JSON status |
+
 ## Recordings and retention
 
 Recordings are fMP4 segments (`.mp4`) written by MediaMTX:
@@ -353,6 +392,7 @@ Common cases:
 | `path_ready=false` for a long time | Camera offline, privacy mode on, or camera not reachable from the server; check `docker logs` and `CONNECTION_TYPE`. |
 | No audio | Unmute the player; check the camera audio setting. |
 | Browser asks for credentials | `WEB_PASSWORD` is set: user `admin`, your configured password. |
+| A recording does not play | It may be the segment currently being written; wait until the next segment starts. Older segments play in VLC or via the Download link. |
 | Disk filling up | Lower `RETENTION_DAYS`/`MAX_STORAGE_GB`, raise `MIN_FREE_GB`, enlarge volume. |
 
 ## Limitations

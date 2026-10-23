@@ -99,6 +99,20 @@ printf "file '%s'\n" /data/recordings/eyes/*.mp4 > /tmp/list.txt
 ffmpeg -f concat -safe 0 -i /tmp/list.txt -c copy /tmp/full.mp4
 ```
 
+## Recording playback
+
+- **A segment is missing from `/recordings`**: only finalized segments are
+  listed. Wait for the current segment to finish (`SEGMENT_MINUTES`).
+- **Video does not start / browser shows an error**: download the segment and
+  play it in VLC to check the file. If that works, try another browser (H.264
+  + AAC in fragmented MP4 is supported by current Chrome/Firefox/Edge/Safari).
+- **Seeking jumps back**: some browsers buffer conservatively; try the native
+  player or VLC.
+- **Old recordings are gone**: they exceeded `RETENTION_DAYS` or were removed
+  by `MAX_STORAGE_GB`/`MIN_FREE_GB`.
+- **`/media/...` returns 404**: the segment was deleted by retention or the
+  token is from a previous app run (reload `/recordings`).
+
 ## Web UI / access
 
 - **HTTP Basic auth prompt**: `WEB_PASSWORD` is set. User: `admin`, password:

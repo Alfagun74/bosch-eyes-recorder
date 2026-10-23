@@ -17,7 +17,7 @@ from .oauth import OAuthFlow
 from .retention import prune, retention_loop
 from .status_http import start_http_server
 
-VERSION = '1.2.0'
+VERSION = '1.3.0'
 log = logging.getLogger('bosch-recorder')
 
 
@@ -35,6 +35,7 @@ class App:
         self.mtx = MediaMTX(cfg, self.data_dir, cfg.mediamtx_binary)
         self.oauth = OAuthFlow()
         self.hls_token = secrets.token_urlsafe(18)
+        self.media_token = secrets.token_urlsafe(18)
 
         self.stop_event = threading.Event()
         self.setup_event = threading.Event()

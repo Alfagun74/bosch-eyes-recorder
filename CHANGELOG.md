@@ -6,6 +6,21 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-24
+
+### Added
+
+- **Recordings browser in the web UI**: `/recordings` lists finalized segments
+  grouped by day, with an embedded player, continuous playback from a chosen
+  segment, and download links.
+- `/api/recordings` JSON endpoint for the recording list.
+- `/media/<token>/<path>` streaming endpoint with HTTP Range support for
+  seeking, protected by an unguessable token.
+
+### Changed
+
+- Version bumped to 1.3.0.
+
 ## [1.2.0] - 2026-10-23
 
 ### Added

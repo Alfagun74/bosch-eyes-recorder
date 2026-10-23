@@ -14,6 +14,9 @@ exist, and what happens in the important error cases.
 │    /oauth/start      creates PKCE verifier/state, redirects to Bosch            │
 │    /oauth/finish     exchanges pasted callback code, stores tokens              │
 │    /hls/<token>/...  reverse proxy to MediaMTX HLS                              │
+    /recordings      recording browser (list, player, download)                   │
+    /api/recordings  recording list as JSON                                      │
+    /media/<token>/  segment streaming with HTTP Range support                   │
 │    /healthz          health endpoint                                            │
 │    /status           JSON status                                                │
 │                                                                                 │
@@ -111,6 +114,16 @@ MediaMTX's ports.
 
 The HLS master playlist contains a separate audio rendition
 (`audio2_stream.m3u8`) that hls.js handles automatically.
+
+## Recordings browser
+
+Recordings are read from the file system (`/data/recordings/**/*.mp4`). Files
+modified within the last 20 seconds are hidden because they are likely the
+segment currently being written. The `/recordings` page groups segments by day,
+embeds an HTML5 player, and streams segments through `/media/<token>/...` with
+HTTP Range support (seek/scrub). "Ab hier" chains consecutive segments in
+chronological order by advancing to the next (newer) segment when the player
+reports `ended`.
 
 ## State and files
 

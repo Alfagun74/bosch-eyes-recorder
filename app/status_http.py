@@ -2,20 +2,114 @@
 from __future__ import annotations
 
 import base64
+import datetime
 import html
 import json
 import logging
 import re
 import threading
+import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 log = logging.getLogger('bosch-recorder.http')
 STATIC_DIR = Path(__file__).resolve().parent / 'static'
 HLS_PATH_RE = re.compile(r'^/hls/([A-Za-z0-9_-]+)/(.+)$')
+MEDIA_PATH_RE = re.compile(r'^/media/([A-Za-z0-9_-]+)/(.+)$')
+RECORDING_NAME_RE = re.compile(
+    r'^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})-(\d{6})\.mp4$')
+
+
+def format_size(num_bytes: int) -> str:
+    if num_bytes >= 1024 ** 3:
+        return '%.2f GB' % (num_bytes / (1024 ** 3))
+    if num_bytes >= 1024 ** 2:
+        return '%.1f MB' % (num_bytes / (1024 ** 2))
+    if num_bytes >= 1024:
+        return '%.1f KB' % (num_bytes / 1024)
+    return '%d B' % num_bytes
+
+
+def parse_byte_range(header: str | None, size: int) -> tuple[int, int] | None:
+    """Parse an HTTP Range header. None means "serve the full file".
+
+    Raises ValueError for unsatisfiable/invalid byte ranges.
+    """
+    if not header:
+        return None
+    value = header.strip()
+    if not value.lower().startswith('bytes='):
+        return None
+    spec = value[6:].split(',', 1)[0].strip()
+    if '-' not in spec:
+        return None
+    first, last = spec.split('-', 1)
+    try:
+        if first == '':
+            suffix = int(last)
+            if suffix <= 0 or size <= 0:
+                raise ValueError
+            start = max(0, size - suffix)
+            end = size - 1
+        else:
+            start = int(first)
+            end = int(last) if last else size - 1
+            if start < 0 or start >= size or end < start:
+                raise ValueError
+            end = min(end, size - 1)
+    except (TypeError, ValueError) as exc:
+        raise ValueError('invalid byte range') from exc
+    return start, end
+
+
+def list_recordings(records_dir: Path, now: float | None = None,
+                    min_age_seconds: float = 20.0) -> list[dict]:
+    """List finalized fMP4 segments, newest first.
+
+    Files modified less than ``min_age_seconds`` ago are skipped because the
+    segment MediaMTX is currently writing is not necessarily playable.
+    """
+    current = time.time() if now is None else now
+    entries: list[dict] = []
+    try:
+        paths = list(records_dir.rglob('*.mp4'))
+    except OSError:
+        paths = []
+    for path in paths:
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        if current - stat.st_mtime < max(0.0, min_age_seconds):
+            continue
+        name = path.name
+        match = RECORDING_NAME_RE.match(name)
+        if match:
+            year, month, day, hour, minute, second, micros = (int(x) for x in match.groups())
+            start = datetime.datetime(year, month, day, hour, minute, second, micros)
+            display_date = start.strftime('%d.%m.%Y')
+            display_time = start.strftime('%H:%M:%S')
+        else:
+            display_date = 'Unbekannt'
+            display_time = name
+        try:
+            rel = path.relative_to(records_dir).as_posix()
+        except ValueError:
+            rel = name
+        entries.append({
+            'name': name,
+            'rel': rel,
+            'size': stat.st_size,
+            'mtime': stat.st_mtime,
+            'display_date': display_date,
+            'display_time': display_time,
+            'label': '%s %s' % (display_date, display_time),
+        })
+    entries.sort(key=lambda entry: entry['mtime'], reverse=True)
+    return entries
 
 
 class StatusHandler(BaseHTTPRequestHandler):
@@ -97,11 +191,21 @@ class StatusHandler(BaseHTTPRequestHandler):
         if match:
             self._proxy_hls(match.group(1), match.group(2), urlparse(self.path).query)
             return
+        media_match = MEDIA_PATH_RE.match(path)
+        if media_match:
+            self._serve_recording(media_match.group(1), media_match.group(2))
+            return
         if not self._require_auth():
             return
         query = parse_qs(urlparse(self.path).query)
         if path == '/status':
             self._json(200, self.app.status())
+            return
+        if path == '/api/recordings':
+            self._json(200, self._recordings_payload())
+            return
+        if path == '/recordings':
+            self._html(200, self._recordings_page())
             return
         if path == '/oauth/start':
             self._oauth_start()
@@ -113,6 +217,17 @@ class StatusHandler(BaseHTTPRequestHandler):
             self._html(200, self._dashboard_page(query.get('login', [''])[0]))
             return
         self._json(404, {'error': 'not found'})
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        path = urlparse(self.path).path
+        match = MEDIA_PATH_RE.match(path)
+        if match:
+            self._serve_recording(match.group(1), match.group(2), head_only=True)
+            return
+        self.send_response(405)
+        self.send_header('Allow', 'GET, HEAD, POST')
+        self.send_header('Content-Length', '0')
+        self.end_headers()
 
     # ---------- POST ----------
     def do_POST(self) -> None:  # noqa: N802
@@ -248,8 +363,154 @@ class StatusHandler(BaseHTTPRequestHandler):
 {error_html}
 {player}
 <h2>Status</h2><table>{table}</table>
-<p><a href="/login">Bosch-Login erneuern</a> · <a href="/status">JSON-Status</a> · <a href="/">Aktualisieren</a></p>
+<p><a href="/recordings">Aufnahmen ansehen</a> · <a href="/login">Bosch-Login erneuern</a> · <a href="/status">JSON-Status</a> · <a href="/">Aktualisieren</a></p>
 ''')
+
+    def _recordings_payload(self) -> dict:
+        entries = list_recordings(self.app.records_dir)
+        items = []
+        for entry in entries:
+            items.append({
+                'name': entry['name'],
+                'path': entry['rel'],
+                'label': entry['label'],
+                'date': entry['display_date'],
+                'size': entry['size'],
+                'size_human': format_size(entry['size']),
+                'url': '/media/%s/%s' % (self.app.media_token, quote(entry['rel'], safe='/')),
+            })
+        total = sum(item['size'] for item in items)
+        return {'count': len(items), 'total_bytes': total, 'total_human': format_size(total),
+                'items': items}
+
+    def _recordings_page(self) -> str:
+        payload = self._recordings_payload()
+        items = payload['items']
+        if not items:
+            body = ('<h1>Aufnahmen</h1><p class="muted">Noch keine abgeschlossenen '
+                    'Aufnahmen vorhanden. Segmente erscheinen nach dem Abschluss '
+                    '(Segmentlaenge: siehe <code>SEGMENT_MINUTES</code>).</p>'
+                    '<p><a href="/">Zurueck</a> · <a href="/recordings">Aktualisieren</a></p>')
+            return self._render('Aufnahmen', body)
+
+        # Ascending queue for "play from here" (chronological playback).
+        ascending = list(reversed(items))
+        index_by_name = {item['name']: index for index, item in enumerate(ascending)}
+        groups: dict[str, list[dict]] = {}
+        for item in items:
+            groups.setdefault(item['date'], []).append(item)
+
+        rows = []
+        for date, entries in groups.items():
+            rows.append('<h2>%s</h2><table class="recordings"><tr>'
+                        '<th>Uhrzeit</th><th>Groesse</th><th>Wiedergabe</th></tr>' % html.escape(date))
+            for entry in entries:
+                index = index_by_name[entry['name']]
+                rows.append(
+                    '<tr><td>%s</td><td>%s</td><td>'
+                    '<button type="button" data-play="%d">&#9654;</button> '
+                    '<button type="button" data-chain="%d">Ab hier</button> '
+                    '<a href="%s" download>Download</a></td></tr>'
+                    % (html.escape(entry['label']), html.escape(entry['size_human']), index, index,
+                       html.escape(entry['url'])))
+            rows.append('</table>')
+        player_js = '''
+<div class="player"><video id="recording" controls preload="metadata" playsinline></video></div>
+<p id="now" class="muted">Kein Segment ausgewaehlt.</p>
+<script>
+(function() {
+  var items = %s;
+  var player = document.getElementById('recording');
+  var current = -1;
+  var chain = false;
+  var now = document.getElementById('now');
+  function playAt(index, continueChain) {
+    if (index < 0 || index >= items.length) { return; }
+    current = index;
+    chain = continueChain;
+    player.src = items[index].url;
+    player.play();
+    now.textContent = 'Wiedergabe: ' + items[index].label;
+  }
+  player.addEventListener('ended', function() {
+    if (chain && current + 1 < items.length) { playAt(current + 1, true); }
+    else { chain = false; }
+  });
+  document.querySelectorAll('button[data-play]').forEach(function(button) {
+    button.addEventListener('click', function() { playAt(parseInt(button.dataset.play, 10), false); });
+  });
+  document.querySelectorAll('button[data-chain]').forEach(function(button) {
+    button.addEventListener('click', function() { playAt(parseInt(button.dataset.chain, 10), true); });
+  });
+})();
+</script>''' % json.dumps([{'url': item['url'], 'label': item['label']} for item in ascending], ensure_ascii=False)
+        body = ('<h1>Aufnahmen</h1>'
+                '<p class="muted">%d Segmente, %s gesamt. Das aktuell laufende Segment '
+                'erscheint nach dem Abschluss. Wiedergabe: Original-H.264/AAC.</p>'
+                '<p><a href="/">Zurueck</a> · <a href="/recordings">Aktualisieren</a></p>'
+                '%s%s' % (payload['count'], html.escape(payload['total_human']), player_js, ''.join(rows)))
+        return self._render('Aufnahmen', body)
+
+    def _serve_recording(self, token: str, rel: str, head_only: bool = False) -> None:
+        if token != self.app.media_token:
+            self._json(404, {'error': 'not found'})
+            return
+        relative = unquote(rel)
+        try:
+            base = self.app.records_dir.resolve()
+            target = (base / relative).resolve()
+        except OSError:
+            self._json(404, {'error': 'not found'})
+            return
+        if target != base and base not in target.parents:
+            self._json(404, {'error': 'not found'})
+            return
+        if target.suffix.lower() != '.mp4' or not target.is_file():
+            self._json(404, {'error': 'not found'})
+            return
+        try:
+            size = target.stat().st_size
+        except OSError:
+            self._json(404, {'error': 'not found'})
+            return
+        range_header = self.headers.get('Range')
+        start, end, status = 0, size - 1, 200
+        if range_header:
+            try:
+                parsed = parse_byte_range(range_header, size)
+            except ValueError:
+                self.send_response(416)
+                self.send_header('Content-Range', 'bytes */%d' % size)
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+                return
+            if parsed is not None:
+                start, end = parsed
+                status = 206
+        length = max(0, end - start + 1)
+        self.send_response(status)
+        self.send_header('Content-Type', 'video/mp4')
+        self.send_header('Accept-Ranges', 'bytes')
+        self.send_header('Content-Length', str(length))
+        self.send_header('Content-Disposition',
+                         'inline; filename="%s"' % target.name.replace('"', ''))
+        if status == 206:
+            self.send_header('Content-Range', 'bytes %d-%d/%d' % (start, end, size))
+        self.end_headers()
+        if head_only:
+            return
+        remaining = length
+        try:
+            with target.open('rb') as handle:
+                handle.seek(start)
+                while remaining > 0:
+                    chunk = handle.read(min(256 * 1024, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def _login_page(self, error: str = '') -> str:
         pending = self._cookie('pending_login')
