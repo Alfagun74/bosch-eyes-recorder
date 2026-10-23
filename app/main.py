@@ -18,7 +18,7 @@ from .retention import prune, retention_loop
 from .status_http import start_http_server
 from .transcode import TranscodeWorker
 
-VERSION = '1.4.0'
+VERSION = '1.4.1'
 log = logging.getLogger('bosch-recorder')
 
 

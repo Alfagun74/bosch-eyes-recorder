@@ -89,9 +89,9 @@ video on your own server.
 - **CapRover/GitHub friendly** – `captain-definition` + Dockerfile, plus a
   GitHub Actions workflow that deploys every push to `main` to CapRover.
 - **Multi-arch image** – builds for `amd64` and `arm64`.
-- **Modern web UI** – responsive dashboard, live player, recordings browser with
-  **day/time filters and a timeline**, dark/light theme, and a dedicated system
-  page.
+- **Modern responsive web UI** – mobile-friendly dashboard, live player, recordings
+  browser with **day/time filters and a timeline**, dark/light theme, and a
+  dedicated system page.
 - **Small surface** – status/health endpoints, JSON status, and structured
   logs; no database.
 
@@ -438,6 +438,11 @@ settings (in `.env`):
    original remains playable in `/recordings`.
 4. The UI lists both `.mp4` (H.264) and `.webm`/`.mkv` (AV1) segments; the
    encoding card on the dashboard shows progress and saved bytes.
+
+> **Segments without audio:** some camera segments carry an audio stream
+> descriptor but no audio packets. The worker probes the segment and encodes
+> those video-only; if Opus still fails, it retries without audio. A failed
+> transcode never deletes the original recording.
 
 > **Note:** Re-encoding an already heavily compressed low-quality camera stream
 > (for example ~0.17 Mbit/s with `HIGH_QUALITY=false`) cannot shrink it

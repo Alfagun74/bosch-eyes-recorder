@@ -134,6 +134,10 @@ ffmpeg -f concat -safe 0 -i /tmp/list.txt -c copy /tmp/full.mp4
   docker compose -f docker-compose.yml -f docker-compose.qsv.yml exec bosch-recorder \
     vainfo --display drm --device /dev/dri/renderD128
   ```
+- **`Could not open encoder before EOF` / `Nothing was written into output
+  file`**: this happens for segments whose audio stream has no packets. The
+  worker now probes audio first and falls back to video-only; update to
+  1.4.1+. The original recording is kept until a transcode succeeds.
 - **`global_quality` / encoder option errors**: try
   `TRANSCODE_BITRATE=1200k` instead of quality mode, or a different
   `TRANSCODE_PRESET`.

@@ -500,7 +500,7 @@ class StatusHandler(BaseHTTPRequestHandler):
   <div class="card"><div class="stat-label">Stream</div><div class="stat-value">{stream_pill}</div>
     <div class="stat-sub">{html.escape(str(media.get('source_host') or '–'))} · {int(media.get('readers') or 0)} Zuschauer</div></div>
   <div class="card"><div class="stat-label">Aufnahme</div><div class="stat-value">{int(media.get('recordings') or 0)} Segmente</div>
-    <div class="stat-sub">{format_size(int((storage.get('mb') or 0) * 1024 * 1024))} · {html.escape(str(retention.get('retention_days', self.app.cfg.retention_days)))} Tage Aufbewahrung</div></div>
+    <div class="stat-sub">{format_size(int((storage.get('mb') or 0) * 1024 * 1024))} · {self._days(retention.get('retention_days', self.app.cfg.retention_days))} Tage Aufbewahrung</div></div>
   <div class="card"><div class="stat-label">Speicher</div><div class="stat-value">{html.escape(str(storage.get('free_gb', '–')))} GB frei</div>
     <div class="stat-sub">MAX_STORAGE_GB {html.escape(str(self.app.cfg.max_storage_gb))} · MIN_FREE_GB {html.escape(str(self.app.cfg.min_free_gb))}</div></div>
   <div class="card"><div class="stat-label">Kodierung</div><div class="stat-value">{html.escape(encoding_value)}</div>
@@ -510,6 +510,13 @@ class StatusHandler(BaseHTTPRequestHandler):
 Aufnahmen werden nach Ablauf der Aufbewahrung automatisch geloescht.</p>
 '''
         return self._render('live', 'Live · Bosch Eyes', body)
+
+    @staticmethod
+    def _days(value) -> str:
+        try:
+            return '%g' % float(value)
+        except (TypeError, ValueError):
+            return html.escape(str(value))
 
     def _recordings_page(self) -> str:
         payload = self._recordings_payload()
@@ -529,19 +536,20 @@ Aufnahmen werden nach Ablauf der Aufbewahrung automatisch geloescht.</p>
         data_json = json.dumps(payload, ensure_ascii=False).replace('</', '<\\/')
         body = f'''
 <div class="page-head">
-  <div><h1>Aufnahmen</h1><p class="lead">Letzte {html.escape(str(self.app.cfg.retention_days))} Tage · {summary}</p></div>
+  <div><h1>Aufnahmen</h1><p class="lead">Letzte {self._days(self.app.cfg.retention_days)} Tage · {summary}</p></div>
   <div class="actions">{mode_badge}<a class="btn" href="/">Live</a></div>
 </div>
 <section class="player-panel" aria-label="Wiedergabe">
   <div class="video-shell">
-    <video id="recording" controls playsinline preload="metadata"></video>
+    <video id="recording" playsinline preload="metadata"></video>
     <div class="player-hint" id="player-hint">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9 5 3-5 3V9Z"/></svg>
       <span>Segment ausw&auml;hlen und abspielen</span>
     </div>
+    <div class="player-buffer" id="player-buffer" hidden><span class="spinner"></span> Segment wird geladen&hellip;</div>
   </div>
   <div class="now-playing">
-    <span id="now-playing" class="muted">Kein Segment ausgewaehlt – waehle unten ein Segment.</span>
+    <span id="now-playing" class="muted" aria-live="polite">Kein Segment ausgewaehlt – waehle unten ein Segment.</span>
     <span class="muted small">Tipp: „Ab hier“ spielt fortlaufend weiter.</span>
   </div>
 </section>
@@ -584,7 +592,7 @@ Aufnahmen werden nach Ablauf der Aufbewahrung automatisch geloescht.</p>
         body = f'''
 <div class="page-head"><div><h1>System</h1><p class="lead">Zustand, Kamera, Stream und Speicher.</p></div>
   <div class="actions"><a class="btn" href="/">Live</a><a class="btn" href="/recordings">Aufnahmen</a><a class="btn" href="/status" target="_blank" rel="noopener">JSON</a></div></div>
-<div class="card"><table>{''.join(rows)}</table></div>
+<div class="card"><div class="table-wrap"><table>{''.join(rows)}</table></div></div>
 <details><summary>Rohdaten (JSON)</summary><pre>{raw}</pre></details>
 '''
         return self._render('system', 'System · Bosch Eyes', body)
@@ -643,7 +651,8 @@ Aufnahmen werden nach Ablauf der Aufbewahrung automatisch geloescht.</p>
 <html lang="de" data-theme="dark">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1220">
 <title>{html.escape(title)}</title>
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/app.css">

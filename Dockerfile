@@ -4,7 +4,7 @@ LABEL org.opencontainers.image.title="Bosch Eyes Recorder" \
       org.opencontainers.image.description="Open-source recorder and web UI (live view + rolling recordings) for Bosch Eyes Gen1 cameras" \
       org.opencontainers.image.source="https://github.com/Alfagun74/bosch-eyes-recorder" \
       org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.version="1.4.0"
+      org.opencontainers.image.version="1.4.1"
 
 ARG TARGETARCH
 ARG MEDIAMTX_VERSION=1.21.1
@@ -16,6 +16,7 @@ ENV PYTHONUNBUFFERED=1 \
     TZ=Europe/Berlin \
     MEDIAMTX_BINARY=/usr/local/bin/mediamtx \
     FFMPEG_BINARY=/usr/lib/jellyfin-ffmpeg/ffmpeg \
+    FFPROBE_BINARY=/usr/lib/jellyfin-ffmpeg/ffprobe \
     LIBVA_DRIVER_NAME=iHD
 
 RUN set -eux; \

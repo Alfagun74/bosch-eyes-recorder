@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.transcode import build_ffmpeg_command, output_for
+from app.transcode import build_ffmpeg_command, output_for, parse_audio_packets
 
 
 def _cfg(**overrides):
@@ -43,6 +43,17 @@ class OutputNamingTests(unittest.TestCase):
         self.assertEqual(output_for(source, 'nope'), source.with_suffix('.webm'))
 
 
+class AudioDetectionTests(unittest.TestCase):
+    def test_audio_packets_present(self) -> None:
+        self.assertIs(parse_audio_packets('1\n'), True)
+
+    def test_no_audio_packets(self) -> None:
+        self.assertIs(parse_audio_packets('0\n'), False)
+
+    def test_no_audio_stream(self) -> None:
+        self.assertIs(parse_audio_packets(''), None)
+
+
 class CommandTests(unittest.TestCase):
     def test_qsv_av1_opus_command(self) -> None:
         source = Path('/data/rec/in.mp4')
@@ -58,6 +69,14 @@ class CommandTests(unittest.TestCase):
         self.assertIn('renderD128', joined)
         self.assertIn('-f webm', joined)
         self.assertEqual(command[-1], str(destination))
+
+    def test_video_only_command_omits_audio(self) -> None:
+        command = build_ffmpeg_command(_cfg(), Path('/data/in.mp4'),
+                                       Path('/data/out.webm'), include_audio=False)
+        joined = ' '.join(command)
+        self.assertNotIn('0:a:0', joined)
+        self.assertNotIn('libopus', joined)
+        self.assertNotIn('-c:a', command)
 
     def test_software_decode_variant_has_no_hwaccel(self) -> None:
         command = build_ffmpeg_command(_cfg(), Path('/data/in.mp4'), Path('/data/out.webm'), False)

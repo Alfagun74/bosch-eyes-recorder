@@ -6,6 +6,27 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-10-24
+
+### Fixed
+
+- **Audio encoder error on camera segments without audio packets**
+  (`Could not open encoder before EOF`, `Nothing was written into output file`).
+  Segments are now probed for usable audio packets first; if there is no
+  audio data, the transcode runs video-only. If the Opus encoder still fails,
+  the worker retries without audio instead of dropping the whole segment.
+- Mobile/responsive UI polish: two-row header with scrollable navigation,
+  full-width page actions removed, tighter cards/filters/segment rows, timeline
+  labels reduced on small screens, single status card spans full width.
+- Empty recordings player now hides native controls until a segment is
+  selected.
+
+### Added
+
+- `FFPROBE_BINARY` configuration (defaults to the bundled Jellyfin FFmpeg
+  `ffprobe`).
+- Tests for audio packet detection and video-only commands.
+
 ## [1.4.0] - 2026-10-24
 
 ### Added

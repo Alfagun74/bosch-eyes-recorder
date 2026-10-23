@@ -98,6 +98,8 @@
     var reset = document.getElementById('filter-reset');
 
     var state = { items: [], currentIndex: -1, chain: false, date: '', from: '', to: '' };
+    player.controls = false;
+    if (player.parentElement) player.parentElement.classList.add('is-empty');
 
     function esc(value) {
       return String(value).replace(/[&<>"']/g, function (ch) {
@@ -122,6 +124,18 @@
     }
     function visible() { return all.filter(matches); }
 
+    function isoDate(date) {
+      return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' +
+        String(date.getDate()).padStart(2, '0');
+    }
+    function chipLabel(date) {
+      var now = new Date();
+      if (date === isoDate(now)) return 'Heute';
+      var yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      if (date === isoDate(yesterday)) return 'Gestern';
+      return esc(fmtDay(date).replace(/^[A-Za-z\u00c4\u00d6\u00dc\u00e4\u00f6\u00fc]+\s/, ''));
+    }
     function renderDayChips() {
       var counts = {};
       all.forEach(function (item) { counts[item.date] = (counts[item.date] || 0) + 1; });
@@ -139,8 +153,7 @@
         chip.type = 'button';
         chip.className = 'chip';
         chip.setAttribute('aria-pressed', String(state.date === date));
-        chip.innerHTML = esc(fmtDay(date).replace(/^[A-Za-zÄÖÜäöü]+\s/, '')) +
-          ' <small>' + counts[date] + '</small>';
+        chip.innerHTML = chipLabel(date) + ' <small>' + counts[date] + '</small>';
         chip.title = fmtDay(date) + ' (' + counts[date] + ' Segmente)';
         chip.addEventListener('click', function () {
           state.date = date; dateInput.value = date; apply();
@@ -155,9 +168,12 @@
       timeline.hidden = !show;
       if (!show) return;
       timelineTrack.innerHTML = '';
-      for (var hour = 0; hour <= 24; hour += 3) {
+      var hourStep = window.innerWidth <= 640 ? 6 : 3;
+      for (var hour = 0; hour <= 24; hour += hourStep) {
         var marker = document.createElement('span');
         marker.className = 'timeline-hour';
+        if (hour === 0) marker.className += ' is-first';
+        if (hour === 24) marker.className += ' is-last';
         marker.style.left = (hour / 24 * 100) + '%';
         var label = document.createElement('span');
         label.textContent = hour + ':00';
@@ -239,28 +255,37 @@
       });
     }
 
-    function playAt(index, chain) {
+    function playAt(index, chain, scroll) {
       if (index < 0 || index >= state.items.length) return;
       state.currentIndex = index;
       state.chain = !!chain;
       var item = state.items[index];
       player.src = item.url;
+      player.controls = true;
+      if (player.parentElement) player.parentElement.classList.remove('is-empty');
       var promise = player.play();
       if (promise && promise.catch) promise.catch(function () { /* controls are visible */ });
       if (nowPlaying) nowPlaying.innerHTML = '<span class="pill ok"><span class="dot"></span>Wiedergabe</span> ' +
         '<strong>' + esc(item.label) + '</strong> <span class="muted">' + esc(item.codec) + ' · ' + esc(item.size_human) + '</span>';
       markActive();
-      player.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (scroll !== false) player.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
     player.addEventListener('play', function () {
       var hint = document.getElementById('player-hint');
       if (hint) hint.hidden = true;
     });
+    var buffer = document.getElementById('player-buffer');
+    if (buffer) {
+      player.addEventListener('waiting', function () { buffer.hidden = false; });
+      player.addEventListener('playing', function () { buffer.hidden = true; });
+      player.addEventListener('canplay', function () { buffer.hidden = true; });
+      player.addEventListener('error', function () { buffer.hidden = true; });
+    }
 
     player.addEventListener('ended', function () {
       if (state.chain && state.currentIndex + 1 < state.items.length) {
-        playAt(state.currentIndex + 1, true);
+        playAt(state.currentIndex + 1, true, false);
       } else if (nowPlaying) {
         state.chain = false;
         nowPlaying.innerHTML = '<span class="pill">Ende</span> <span class="muted">Kein weiteres Segment in dieser Auswahl.</span>';
@@ -299,9 +324,9 @@
     }
 
     function resetFilters() {
-      state.from = ''; state.to = '';
+      state.from = ''; state.to = ''; state.date = latest;
       fromInput.value = ''; toInput.value = '';
-      dateInput.value = state.date;
+      dateInput.value = latest;
       apply();
     }
 

@@ -61,6 +61,7 @@ class Config:
     transcode_bitrate: str = ''
     transcode_device: str = '/dev/dri/renderD128'
     ffmpeg_binary: str = '/usr/lib/jellyfin-ffmpeg/ffmpeg'
+    ffprobe_binary: str = '/usr/lib/jellyfin-ffmpeg/ffprobe'
     transcode_min_age_seconds: int = 30
 
     @classmethod
@@ -104,5 +105,6 @@ class Config:
             transcode_bitrate=(os.environ.get('TRANSCODE_BITRATE') or '').strip(),
             transcode_device=(os.environ.get('TRANSCODE_DEVICE') or '/dev/dri/renderD128').strip(),
             ffmpeg_binary=(os.environ.get('FFMPEG_BINARY') or '/usr/lib/jellyfin-ffmpeg/ffmpeg').strip(),
+            ffprobe_binary=(os.environ.get('FFPROBE_BINARY') or '/usr/lib/jellyfin-ffmpeg/ffprobe').strip(),
             transcode_min_age_seconds=_int('TRANSCODE_MIN_AGE_SECONDS', 30),
         )

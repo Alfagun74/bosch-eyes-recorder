@@ -35,6 +35,7 @@ services:
       TRANSCODE_DEVICE: "${TRANSCODE_DEVICE:-/dev/dri/renderD128}"
       TRANSCODE_MIN_AGE_SECONDS: "${TRANSCODE_MIN_AGE_SECONDS:-30}"
       FFMPEG_BINARY: "${FFMPEG_BINARY:-/usr/lib/jellyfin-ffmpeg/ffmpeg}"
+      FFPROBE_BINARY: "${FFPROBE_BINARY:-/usr/lib/jellyfin-ffmpeg/ffprobe}"
     volumes:
       - ./data:/data
     logging:

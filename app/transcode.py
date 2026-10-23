@@ -36,25 +36,56 @@ def output_for(source: Path, container: str) -> Path:
 
 
 def build_ffmpeg_command(cfg: Config, source: Path, destination: Path,
-                         hardware_decode: bool = True) -> list[str]:
-    """Build the ffmpeg command for one finalized segment."""
+                         hardware_decode: bool = True,
+                         include_audio: bool = True) -> list[str]:
+    """Build the ffmpeg command for one finalized segment.
+
+    ``include_audio=False`` is used when a segment carries an audio stream
+    descriptor without a single audio packet (this happens for some camera
+    segments). Mapping such an empty stream makes libopus fail with
+    "Could not open encoder before EOF" and ffmpeg then writes nothing.
+    """
     fmt, _, _ = CONTAINERS.get(cfg.transcode_container, CONTAINERS['webm'])
     command = [cfg.ffmpeg_binary, '-hide_banner', '-nostdin', '-y', '-loglevel', 'warning']
     if hardware_decode:
         command += ['-hwaccel', 'qsv', '-hwaccel_device', cfg.transcode_device,
                     '-hwaccel_output_format', 'qsv']
-    command += ['-i', str(source), '-map', '0:v:0', '-map', '0:a:0?']
+    command += ['-i', str(source), '-map', '0:v:0']
+    if include_audio:
+        command += ['-map', '0:a:0?']
     command += ['-c:v', cfg.transcode_encoder, '-preset', cfg.transcode_preset]
     if cfg.transcode_bitrate:
         command += ['-b:v', cfg.transcode_bitrate]
     else:
         command += ['-global_quality', str(cfg.transcode_quality)]
-    command += ['-c:a', 'libopus', '-b:a', cfg.transcode_audio_bitrate]
+    if include_audio:
+        command += ['-c:a', 'libopus', '-b:a', cfg.transcode_audio_bitrate]
     command += ['-map_metadata', '-1']
     if fmt == 'mp4':
         command += ['-movflags', '+faststart']
     command += ['-f', fmt, str(destination)]
     return command
+
+
+def parse_audio_packets(output: str) -> bool | None:
+    """Interpret ``ffprobe -count_packets`` output for audio streams.
+
+    Returns True when at least one audio packet exists, False when the segment
+    has no usable audio packets, and None when the output is not usable.
+    """
+    saw_number = False
+    for line in output.splitlines():
+        value = line.strip().split(',')[-1].strip()
+        if not value:
+            continue
+        try:
+            packets = int(value)
+        except ValueError:
+            continue
+        saw_number = True
+        if packets > 0:
+            return True
+    return False if saw_number else None
 
 
 class TranscodeWorker:
@@ -208,20 +239,41 @@ class TranscodeWorker:
         temporary = destination.with_name(destination.name + '.part')
         _unlink(temporary)
         source_size = source.stat().st_size
+        has_audio = self._has_audio(source)
         errors: list[str] = []
-        for hardware_decode in (True, False):
-            command = build_ffmpeg_command(self.cfg, source, temporary, hardware_decode)
-            log.info('Transcode %s -> %s (%s, HW-Decode=%s)',
-                     source.name, destination.name, self.cfg.transcode_encoder, hardware_decode)
+        attempts: list[tuple[bool, bool]] = []
+        if has_audio is False:
+            attempts = [(True, False), (False, False)]
+            log.info('Segment %s enthaelt keine Audiopakete; transkodiere ohne Audio.',
+                     source.name)
+        else:
+            attempts = [(True, True), (False, True), (True, False), (False, False)]
+        seen: set[tuple[bool, bool]] = set()
+        for hardware_decode, include_audio in attempts:
+            if (hardware_decode, include_audio) in seen:
+                continue
+            seen.add((hardware_decode, include_audio))
+            command = build_ffmpeg_command(self.cfg, source, temporary,
+                                           hardware_decode, include_audio)
+            log.info('Transcode %s -> %s (%s, HW-Decode=%s, Audio=%s)',
+                     source.name, destination.name, self.cfg.transcode_encoder,
+                     hardware_decode, include_audio)
+            proc = None
             try:
                 proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                         text=True, encoding='utf-8', errors='replace')
                 self._proc = proc
                 try:
                     _, stderr = proc.communicate(timeout=1800)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.communicate()
+                    errors.append('ffmpeg timeout')
+                    _unlink(temporary)
+                    continue
                 finally:
                     self._proc = None
-            except (OSError, subprocess.TimeoutExpired) as exc:
+            except OSError as exc:
                 errors.append(str(exc))
                 _unlink(temporary)
                 continue
@@ -233,14 +285,38 @@ class TranscodeWorker:
                     self._processed += 1
                     self._bytes_saved += max(0, source_size - output_size)
                     self._last_error = None
+                if include_audio is False and has_audio is not False:
+                    log.warning('Transcode %s ohne Audio gespeichert (Audio-Encoder '
+                                'konnte die Quelle nicht verarbeiten).', source.name)
                 log.info('Transcode fertig: %s (%s -> %s)', source.name,
                          _human(source_size), _human(output_size))
                 return
             errors.append((stderr or '').strip()[-500:])
             _unlink(temporary)
-            if not hardware_decode:
-                break
         raise RuntimeError('; '.join(error for error in errors if error) or 'ffmpeg exit != 0')
+
+    def _has_audio(self, source: Path) -> bool | None:
+        """Return whether the segment has at least one decodable audio packet.
+
+        None means the probe could not be executed; in that case the transcode
+        sequence still retries without audio after an audio failure.
+        """
+        binary = self.cfg.ffprobe_binary
+        if not (Path(binary).is_file() or shutil.which(binary)):
+            return None
+        try:
+            result = subprocess.run(
+                [binary, '-v', 'error', '-select_streams', 'a', '-count_packets',
+                 '-show_entries', 'stream=nb_read_packets', '-of', 'csv=p=0', str(source)],
+                capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if result.returncode != 0:
+            return None
+        if not result.stdout.strip():
+            # No audio stream at all in this segment.
+            return False
+        return parse_audio_packets(result.stdout)
 
 
 def _unlink(path: Path) -> None:
