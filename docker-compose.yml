@@ -1,0 +1,20 @@
+services:
+  bosch-recorder:
+    build: .
+    image: bosch-eyes-recorder:latest
+    container_name: bosch-eyes-recorder
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    ports:
+      - "80:80"
+    environment:
+      TZ: Europe/Berlin
+      RETENTION_DAYS: "7"
+      SEGMENT_MINUTES: "10"
+      HIGH_QUALITY: "false"
+      # Optional: bootstrap token; alternatively use the web UI at /login
+      BOSCH_REFRESH_TOKEN: "${BOSCH_REFRESH_TOKEN:-}"
+      WEB_PASSWORD: "${WEB_PASSWORD:-}"
+    volumes:
+      - ./data:/data

@@ -1,0 +1,17 @@
+.git
+.github
+docs
+tests
+data
+__pycache__
+*.py[cod]
+*.log
+deploy.tar
+docker-compose.yml
+README.md
+CHANGELOG.md
+CONTRIBUTING.md
+SECURITY.md
+CODE_OF_CONDUCT.md
+LICENSE
+NOTICE.md

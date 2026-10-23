@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Runtime data and secrets
+data/
+tests/data*/
+deploy.tar
+*.log
+.env
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

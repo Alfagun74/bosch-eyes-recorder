@@ -1,0 +1,19 @@
+[project]
+name = "bosch-eyes-recorder"
+version = "1.2.0"
+description = "Docker/CapRover recorder and web UI for Bosch Eyes Gen1 cameras"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+  "requests>=2.31,<3",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = [".venv", "app/static"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/Alfagun74/bosch-eyes-recorder/blob/main/docs/TROUBLESHOOTING.md
+    about: Check the troubleshooting guide before opening an issue.
+  - name: Security report
+    url: https://github.com/Alfagun74/bosch-eyes-recorder/security/advisories/new
+    about: Please report security vulnerabilities privately, not as a public issue.
