@@ -1,6 +1,7 @@
 """Unit tests: recording list and HTTP Range parsing (no camera)."""
 from __future__ import annotations
 
+import datetime
 import os
 import tempfile
 import time
@@ -70,6 +71,9 @@ class RecordingListTests(unittest.TestCase):
         self.assertEqual(entry['rel'], 'eyes/2026-01-31_23-10-02-283092.mp4')
         self.assertEqual(entry['display_date'], '31.01.2026')
         self.assertEqual(entry['display_time'], '23:10:02')
+        self.assertEqual(entry['date'], '2026-01-31')
+        self.assertEqual(entry['time'], '23:10:02')
+        self.assertEqual(entry['codec'], 'H.264')
         self.assertEqual(entry['size'], 1024)
 
     def test_skips_currently_written_segment(self) -> None:
@@ -86,11 +90,25 @@ class RecordingListTests(unittest.TestCase):
         entries = list_recordings(self.records, min_age_seconds=10)
         self.assertEqual([e['display_time'] for e in entries], ['00:00:00', '23:00:00', '22:00:00'])
 
-    def test_unknown_filename_is_listed(self) -> None:
-        self._file('eyes/legacy-recording.mp4', age_seconds=120)
+    def test_unknown_filename_falls_back_to_mtime(self) -> None:
+        path = self._file('eyes/legacy-recording.mp4', age_seconds=120)
         entries = list_recordings(self.records)
         self.assertEqual(len(entries), 1)
-        self.assertEqual(entries[0]['display_date'], 'Unbekannt')
+        expected = datetime.datetime.fromtimestamp(path.stat().st_mtime).strftime('%d.%m.%Y')
+        self.assertEqual(entries[0]['display_date'], expected)
+
+    def test_webm_is_listed_as_av1(self) -> None:
+        path = self._file('eyes/2026-01-31_23-20-00-000000.webm', age_seconds=120)
+        entries = list_recordings(self.records)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]['ext'], 'webm')
+        self.assertEqual(entries[0]['codec'], 'AV1')
+        self.assertEqual(entries[0]['name'], path.name)
+
+    def test_av1_mp4_filename_is_detected(self) -> None:
+        self._file('eyes/2026-01-31_23-30-00-000000.av1.mp4', age_seconds=120)
+        entries = list_recordings(self.records)
+        self.assertEqual(entries[0]['codec'], 'AV1')
 
     def test_missing_directory(self) -> None:
         self.assertEqual(list_recordings(self.records / 'missing'), [])

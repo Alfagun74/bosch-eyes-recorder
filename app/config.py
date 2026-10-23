@@ -51,6 +51,17 @@ class Config:
     mediamtx_api_addr: str
     mediamtx_hls_addr: str
     mediamtx_rtsp_addr: str
+    transcode_enabled: bool = False
+    transcode_existing: bool = True
+    transcode_encoder: str = 'av1_qsv'
+    transcode_container: str = 'webm'
+    transcode_quality: int = 32
+    transcode_preset: str = 'slow'
+    transcode_audio_bitrate: str = '48k'
+    transcode_bitrate: str = ''
+    transcode_device: str = '/dev/dri/renderD128'
+    ffmpeg_binary: str = '/usr/lib/jellyfin-ffmpeg/ffmpeg'
+    transcode_min_age_seconds: int = 30
 
     @classmethod
     def from_env(cls) -> 'Config':
@@ -83,4 +94,15 @@ class Config:
             mediamtx_api_addr=os.environ.get('MEDIAMTX_API_ADDR', '127.0.0.1:9997').strip(),
             mediamtx_hls_addr=os.environ.get('MEDIAMTX_HLS_ADDR', '127.0.0.1:8888').strip(),
             mediamtx_rtsp_addr=os.environ.get('MEDIAMTX_RTSP_ADDR', '127.0.0.1:8554').strip(),
+            transcode_enabled=_bool('TRANSCODE_ENABLED', False),
+            transcode_existing=_bool('TRANSCODE_EXISTING', True),
+            transcode_encoder=(os.environ.get('TRANSCODE_ENCODER') or 'av1_qsv').strip(),
+            transcode_container=(os.environ.get('TRANSCODE_CONTAINER') or 'webm').strip().lower(),
+            transcode_quality=_int('TRANSCODE_QUALITY', 32, minimum=1),
+            transcode_preset=(os.environ.get('TRANSCODE_PRESET') or 'slow').strip(),
+            transcode_audio_bitrate=(os.environ.get('TRANSCODE_AUDIO_BITRATE') or '48k').strip(),
+            transcode_bitrate=(os.environ.get('TRANSCODE_BITRATE') or '').strip(),
+            transcode_device=(os.environ.get('TRANSCODE_DEVICE') or '/dev/dri/renderD128').strip(),
+            ffmpeg_binary=(os.environ.get('FFMPEG_BINARY') or '/usr/lib/jellyfin-ffmpeg/ffmpeg').strip(),
+            transcode_min_age_seconds=_int('TRANSCODE_MIN_AGE_SECONDS', 30),
         )

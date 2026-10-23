@@ -6,6 +6,36 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-10-24
+
+### Added
+
+- **Optional AV1/Opus hardware transcoding** with Intel QSV (`av1_qsv` +
+  `libopus`) for finalized segments; new `.webm`/`.mkv`/`.mp4` outputs and a
+  background worker that keeps the original until the transcode succeeds.
+- **Modern responsive web UI**: dashboard with live player and status cards,
+  login flow, dedicated system page, dark/light theme.
+- **Recordings browser improvements**: day picker, time-of-day filters, day
+  chips, 24-hour timeline, codec badges, "play from here" queue, download links,
+  and shareable filter URLs.
+- Compose override `docker-compose.qsv.yml` for Intel Arc GPU passthrough.
+- The amd64 image bundles Jellyfin FFmpeg (QSV + libopus) and verifies the
+  encoder at build time.
+- UI screenshot and additional documentation.
+
+### Fixed
+
+- **Recordings playback did nothing** because the player JavaScript attached
+  its click handlers before the segment buttons existed in the DOM. The UI now
+  initializes after `DOMContentLoaded`.
+- The recordings API and player now support `.mp4`, `.webm` and `.mkv` segments.
+
+### Changed
+
+- Version bumped to 1.4.0.
+- Docker Compose remains the primary installation path; the QSV override is a
+  documented add-on.
+
 ## [1.3.0] - 2026-10-24
 
 ### Added

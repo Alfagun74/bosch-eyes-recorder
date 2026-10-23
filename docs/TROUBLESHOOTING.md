@@ -113,6 +113,49 @@ ffmpeg -f concat -safe 0 -i /tmp/list.txt -c copy /tmp/full.mp4
 - **`/media/...` returns 404**: the segment was deleted by retention or the
   token is from a previous app run (reload `/recordings`).
 
+## AV1/Opus transcoding (Intel QSV)
+
+- **`Encoder fehlen: av1_qsv` / worker inactive**: the container is not the
+  amd64 image, FFmpeg is missing, or the Jellyfin FFmpeg build did not include
+  QSV. Check:
+  ```bash
+  docker compose -f docker-compose.yml -f docker-compose.qsv.yml exec bosch-recorder \
+    ffmpeg -hide_banner -encoders | grep -E 'av1_qsv|libopus'
+  ```
+- **Device errors (`/dev/dri`, permission denied, failed to initialise)**:
+  pass the render node and the host render GID:
+  ```yaml
+  devices: ["/dev/dri:/dev/dri"]
+  group_add: ["122"]   # getent group render | cut -d: -f3 on the host
+  ```
+  The container currently runs as root, which normally suffices for device
+  access. Verify with:
+  ```bash
+  docker compose -f docker-compose.yml -f docker-compose.qsv.yml exec bosch-recorder \
+    vainfo --display drm --device /dev/dri/renderD128
+  ```
+- **`global_quality` / encoder option errors**: try
+  `TRANSCODE_BITRATE=1200k` instead of quality mode, or a different
+  `TRANSCODE_PRESET`.
+- **No storage savings**: with a low-quality source (`HIGH_QUALITY=false`) the
+  H.264 stream is already very small; re-encoding can even increase size. Use
+  `HIGH_QUALITY=true` and verify with a few segments.
+- **CapRover**: CapRover's app deployment does not expose `/dev/dri`; use the
+  Docker Compose + qsv override path for GPU transcoding.
+- **Old segments are not converted**: `TRANSCODE_EXISTING=false` excludes
+  files created before the worker starts; set it to `true` (default).
+
+## Playback of recordings
+
+- **Play button does nothing**: update to 1.4.0+; older versions attached
+  player handlers before the list existed. Hard-refresh the page after updating.
+- **Video fails to play / MEDIA_ERR_SRC_NOT_SUPPORTED**: the segment may be the
+  currently written file (hidden after ~20 s), or the browser lacks the codec
+  (Safari with WebM/AV1+Opus). Download the file and play it in VLC, or set
+  `TRANSCODE_CONTAINER=mkv`/`mp4` as appropriate.
+- **Seeking resets**: some browsers handle fragmented MP4 conservatively; try
+  another browser or VLC. Byte-range serving is enabled.
+
 ## Web UI / access
 
 - **HTTP Basic auth prompt**: `WEB_PASSWORD` is set. User: `admin`, password:

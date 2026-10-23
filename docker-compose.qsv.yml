@@ -1,0 +1,11 @@
+services:
+  bosch-recorder:
+    # Intel Arc / QSV: pass the render device into the container and enable
+    # AV1/Opus transcoding. Use together with the main compose file:
+    #   docker compose -f docker-compose.yml -f docker-compose.qsv.yml up -d --build
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${RENDER_GID:-109}"
+    environment:
+      TRANSCODE_ENABLED: "${TRANSCODE_ENABLED:-true}"

@@ -52,8 +52,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Validate Docker Compose file
-        run: docker compose config > /dev/null
+      - name: Validate Docker Compose files
+        run: |
+          docker compose config > /dev/null
+          docker compose -f docker-compose.yml -f docker-compose.qsv.yml config > /dev/null
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4

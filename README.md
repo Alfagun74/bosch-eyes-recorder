@@ -33,6 +33,8 @@ recording with rolling retention (default: 7 days) in a Docker volume.
 - [Configuration](#configuration)
 - [Live view](#live-view)
 - [Browse recorded footage](#browse-recorded-footage)
+- [Endpoints](#endpoints)
+- [Hardware transcoding (AV1/Opus, Intel QSV)](#hardware-transcoding-av1opus-intel-qsv)
 - [Recordings and retention](#recordings-and-retention)
 - [Storage sizing](#storage-sizing)
 - [Security](#security)
@@ -73,7 +75,10 @@ video on your own server.
   your Bosch/SingleKey ID account, paste the resulting callback URL back into
   the app. The app exchanges it (PKCE) and stores a rotating refresh token.
 - **Continuous recording** – MediaMTX records the camera's original H.264/AAC
-  tracks as fMP4 segments; no ffmpeg, no transcoding.
+  tracks as fMP4 segments; no ffmpeg, no transcoding in the default mode.
+- **Optional AV1/Opus hardware transcoding** – re-encode finalized segments on
+  an Intel Arc GPU via **QSV** (`av1_qsv`) with Opus audio for much smaller
+  recordings (WebM/MKV/MP4 output, browser playback included).
 - **Browse past recordings in the UI** – list segments by day, play them in the
   browser (seekable, with audio), play continuously from any point, or download
   them.
@@ -84,6 +89,9 @@ video on your own server.
 - **CapRover/GitHub friendly** – `captain-definition` + Dockerfile, plus a
   GitHub Actions workflow that deploys every push to `main` to CapRover.
 - **Multi-arch image** – builds for `amd64` and `arm64`.
+- **Modern web UI** – responsive dashboard, live player, recordings browser with
+  **day/time filters and a timeline**, dark/light theme, and a dedicated system
+  page.
 - **Small surface** – status/health endpoints, JSON status, and structured
   logs; no database.
 
@@ -162,6 +170,15 @@ docker compose up -d --force-recreate      # apply changed .env values
   and live stream are open to anyone who can reach the host.
 - The image is rebuilt locally on first start and downloads a pinned MediaMTX
   release; the build machine needs Internet access.
+
+For an Intel Arc GPU, add the QSV override (passes `/dev/dri` and enables
+AV1/Opus transcoding):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.qsv.yml up -d --build
+```
+
+See [Hardware transcoding](#hardware-transcoding-av1opus-intel-qsv) for details.
 
 If you cannot use Compose, the equivalent command is:
 
@@ -307,6 +324,16 @@ All configuration is via environment variables.
 | `MEDIAMTX_API_ADDR` | `127.0.0.1:9997` | Internal MediaMTX API address. |
 | `MEDIAMTX_HLS_ADDR` | `127.0.0.1:8888` | Internal MediaMTX HLS address. |
 | `MEDIAMTX_RTSP_ADDR` | `127.0.0.1:8554` | Internal MediaMTX RTSP address (loopback only). |
+| `TRANSCODE_ENABLED` | `false` | Enable AV1/Opus transcoding (requires QSV or a compatible FFmpeg build). |
+| `TRANSCODE_CONTAINER` | `webm` | `webm`, `mkv`, or `mp4` output container. |
+| `TRANSCODE_QUALITY` | `32` | QSV ICQ quality (lower = better/larger). |
+| `TRANSCODE_PRESET` | `slow` | QSV preset. |
+| `TRANSCODE_AUDIO_BITRATE` | `48k` | Opus audio bitrate. |
+| `TRANSCODE_BITRATE` | *(empty)* | Optional target video bitrate instead of quality mode. |
+| `TRANSCODE_EXISTING` | `true` | Transcode existing `.mp4` recordings too. |
+| `TRANSCODE_MIN_AGE_SECONDS` | `30` | Minimum age of a segment before transcoding. |
+| `TRANSCODE_DEVICE` | `/dev/dri/renderD128` | QSV render device. |
+| `FFMPEG_BINARY` | `/usr/lib/jellyfin-ffmpeg/ffmpeg` | FFmpeg binary used for transcoding. |
 
 Environment variables containing secrets (`WEB_PASSWORD`, `BOSCH_REFRESH_TOKEN`)
 should be set as CapRover app secrets/environment values, not committed to git.
@@ -356,6 +383,88 @@ media files are served under an unguessable token path
 | `/hls/<token>/eyes/index.m3u8` | Live HLS stream (used by the player) |
 | `/healthz` | Healthcheck for Docker/CapRover |
 | `/status` | Full JSON status |
+
+![Recordings browser](docs/images/recordings.png)
+
+## Hardware transcoding (AV1/Opus, Intel QSV)
+
+By default MediaMTX records the camera stream **without re-encoding** (H.264 +
+AAC). Optionally the container can re-encode every finalized segment to **AV1
+via Intel QSV** and **Opus** audio, which drastically reduces storage on a
+server with an Intel Arc GPU (DG2/A-series, e.g. **Arc A380**).
+
+### Requirements
+
+- Intel Arc A-series GPU with AV1 encode support (DG2), Linux kernel **6.2+**;
+  Resizable-BAR is recommended (required for Arc B-series).
+- Docker access to the GPU render node (`/dev/dri/renderD128`).
+- The amd64 image already bundles **Jellyfin FFmpeg** (with `av1_qsv` +
+  `libopus`) and the required Intel user-mode driver libraries. The arm64 image
+  does **not** include transcoding support.
+- Docker Compose (CapRover does not expose GPU devices; use the Compose path
+  for QSV).
+
+### Enable
+
+```bash
+cp .env.example .env
+# set WEB_PASSWORD, optionally HIGH_QUALITY=true (recommended for better source quality)
+docker compose -f docker-compose.yml -f docker-compose.qsv.yml up -d --build
+```
+
+The QSV override passes `/dev/dri` and sets `TRANSCODE_ENABLED=true`. Relevant
+settings (in `.env`):
+
+| Variable | Default | Description |
+|---|---|---|
+| `TRANSCODE_ENABLED` | `false` | Enable background AV1/Opus transcoding |
+| `TRANSCODE_CONTAINER` | `webm` | `webm` (browser playback), `mkv` (VLC), `mp4` |
+| `TRANSCODE_QUALITY` | `32` | QSV ICQ quality; lower = better/larger |
+| `TRANSCODE_PRESET` | `slow` | QSV encoder preset |
+| `TRANSCODE_AUDIO_BITRATE` | `48k` | Opus bitrate |
+| `TRANSCODE_BITRATE` | *(empty)* | Use a target bitrate instead of quality |
+| `TRANSCODE_EXISTING` | `true` | Also convert existing `.mp4` recordings |
+| `TRANSCODE_MIN_AGE_SECONDS` | `30` | Only convert segments older than this |
+| `TRANSCODE_DEVICE` | `/dev/dri/renderD128` | QSV render device |
+| `RENDER_GID` | `109` | Host `render` group GID (see `getent group render`) |
+
+### How it works
+
+1. MediaMTX keeps writing the original `.mp4` segments (max. one segment of
+   loss on crashes).
+2. A background worker converts each finalized segment with FFmpeg:
+   `av1_qsv` + `libopus` (`-global_quality 32 -preset slow` by default).
+3. The original is deleted only after a successful transcode. Until then, the
+   original remains playable in `/recordings`.
+4. The UI lists both `.mp4` (H.264) and `.webm`/`.mkv` (AV1) segments; the
+   encoding card on the dashboard shows progress and saved bytes.
+
+> **Note:** Re-encoding an already heavily compressed low-quality camera stream
+> (for example ~0.17 Mbit/s with `HIGH_QUALITY=false`) cannot shrink it
+> dramatically without visible quality loss. For meaningful savings, set
+> `HIGH_QUALITY=true` so the camera provides a higher-quality source, then let
+> the A380 encode AV1. Test with a few segments and compare size/quality.
+
+### Verify the GPU in the container
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.qsv.yml exec bosch-recorder \
+  ffmpeg -hide_banner -encoders | grep -E 'av1_qsv|libopus'
+
+docker compose -f docker-compose.yml -f docker-compose.qsv.yml exec bosch-recorder \
+  vainfo --display drm --device /dev/dri/renderD128
+```
+
+Then watch the logs (`docker compose ... logs -f`) and the **Kodierung** card on
+the dashboard. If the encoder is missing or the device is inaccessible, the
+worker reports the error and **keeps the original recordings** — recording is
+never blocked by transcoding.
+
+### Playback
+
+WebM (AV1 + Opus) plays in current Chrome, Edge and Firefox; Safari may not
+support WebM/Opus. Use `TRANSCODE_CONTAINER=mkv` and VLC/ffmpeg if you need
+maximum player compatibility, or `mp4` for AV1-in-MP4 containers.
 
 ## Recordings and retention
 
@@ -443,8 +552,11 @@ Common cases:
   integration; pin/upgrade the project when Bosch changes the app.
 - **Tested hardware:** Bosch Eyes Gen1 (SVO-1601-220, firmware 7.91.56) with
   `CONNECTION_TYPE=LOCAL`. Other models/firmware may work but are not verified.
-- **No transcoding or motion detection.** The original camera codecs are
-  recorded as-is; storage sizing follows the camera bitrate.
+- **Optional transcoding needs hardware.** AV1/Opus via QSV requires an Intel
+  Arc GPU, `/dev/dri` access, a recent kernel, and Docker Compose. The default
+  mode records the original camera codecs as-is; storage sizing then follows
+  the camera bitrate. This project was not tested on an A380 during CI (CI has
+  no GPU); verify the encoder on your server.
 
 ## Development
 
@@ -474,6 +586,7 @@ tools/               optional refresh-token helper
 Dockerfile           multi-arch image (Python + pinned MediaMTX)
 captain-definition   CapRover build definition
 docker-compose.yml   recommended Docker Compose setup
+docker-compose.qsv.yml optional Intel QSV/AV1 override
 .env.example         documented environment template for Compose
 ```
 

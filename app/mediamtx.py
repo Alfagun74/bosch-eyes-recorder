@@ -157,7 +157,9 @@ class MediaMTX:
     def status(self) -> dict:
         with self._lock:
             state = dict(self._state)
-        files = list(self.recordings_dir.rglob('*.mp4'))
+        files = (list(self.recordings_dir.rglob('*.mp4'))
+                 + list(self.recordings_dir.rglob('*.webm'))
+                 + list(self.recordings_dir.rglob('*.mkv')))
         state['recordings'] = len(files)
         state['recordings_mb'] = round(sum(f.stat().st_size for f in files if f.is_file()) / (1024 ** 2), 1)
         state['latest_recording'] = max(files, key=lambda p: p.stat().st_mtime).name if files else None

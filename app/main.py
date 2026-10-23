@@ -16,8 +16,9 @@ from .mediamtx import MediaMTX
 from .oauth import OAuthFlow
 from .retention import prune, retention_loop
 from .status_http import start_http_server
+from .transcode import TranscodeWorker
 
-VERSION = '1.3.0'
+VERSION = '1.4.0'
 log = logging.getLogger('bosch-recorder')
 
 
@@ -33,6 +34,7 @@ class App:
         self.auth = BoschAuth(self.data_dir, cfg.bootstrap_token)
         self.cloud = BoschCloud(self.auth, cfg)
         self.mtx = MediaMTX(cfg, self.data_dir, cfg.mediamtx_binary)
+        self.transcode = TranscodeWorker(cfg, self.records_dir) if cfg.transcode_enabled else None
         self.oauth = OAuthFlow()
         self.hls_token = secrets.token_urlsafe(18)
         self.media_token = secrets.token_urlsafe(18)
@@ -66,6 +68,7 @@ class App:
             status = dict(self._status)
         status['auth_has_token'] = self.auth.has_token()
         status['media'] = self.mtx.status()
+        status['transcode'] = self.transcode.status() if self.transcode else {'enabled': False}
         status['retention'] = dict(self._retention_stats)
         status['storage'] = self._storage_stats()
         status['uptime_seconds'] = round(time.time() - self._started_at)
@@ -83,7 +86,9 @@ class App:
             files = 0
             total = 0
             try:
-                for path in self.records_dir.rglob('*.mp4'):
+                for path in (list(self.records_dir.rglob('*.mp4'))
+                             + list(self.records_dir.rglob('*.webm'))
+                             + list(self.records_dir.rglob('*.mkv'))):
                     try:
                         total += path.stat().st_size
                         files += 1
@@ -166,6 +171,10 @@ class App:
                               self.cfg.max_storage_gb, self.cfg.min_free_gb)
                 self._retention_stats.update(stats)
                 self.mtx.start()
+                if self.transcode:
+                    self.transcode.start()
+                    log.info('Transcoding aktiv: %s -> %s (%s)', self.cfg.transcode_encoder,
+                             self.cfg.transcode_container, self.cfg.transcode_preset)
                 self._update(phase='running')
                 log.info('Aufnahme gestartet fuer Kamera %s (id=%s).',
                          camera.get('title'), camera.get('id'))
@@ -249,6 +258,8 @@ class App:
     def shutdown(self) -> None:
         log.info('Beende Recorder.')
         self.stop_event.set()
+        if self.transcode:
+            self.transcode.stop()
         self.mtx.stop()
         if self._http_server is not None:
             try:

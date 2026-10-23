@@ -23,7 +23,8 @@ def _scan(records_dir: Path) -> list[tuple[float, int, Path]]:
     files: list[tuple[float, int, Path]] = []
     if not records_dir.exists():
         return files
-    for path in list(records_dir.rglob('*.mp4')) + list(records_dir.rglob('*.mkv')):
+    for path in (list(records_dir.rglob('*.mp4')) + list(records_dir.rglob('*.webm'))
+                 + list(records_dir.rglob('*.mkv'))):
         try:
             stat = path.stat()
         except OSError:

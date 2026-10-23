@@ -45,3 +45,9 @@ imply endorsement.
 The software is provided "as is", without warranty of any kind. Use it at your
 own risk and ensure that your use complies with applicable law, privacy rules,
 and any terms of service that apply to you.
+
+6. Das amd64-Image installiert zur Build-Zeit **jellyfin-ffmpeg8** aus dem
+   Jellyfin-Repository (https://repo.jellyfin.org), einen FFmpeg-Build unter
+   GPL-Lizenz (u. a. mit x264/x265/Intel-QSV/Opus). Das Binary wird nicht Teil
+   des Quellcodes, sondern nur des gebauten Docker-Images; es gelten die
+   Lizenzbedingungen des Jellyfin-FFmpeg-Pakets.

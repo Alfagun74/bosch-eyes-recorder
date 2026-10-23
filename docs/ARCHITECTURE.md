@@ -26,6 +26,7 @@ exist, and what happens in the important error cases.
 │  cloud.py            Bosch Residential API client + camera TLS pin              │
 │  mediamtx.py         MediaMTX config generation, process supervision, HLS       │
 │  retention.py        rolling deletion (age/size/free space)                     │
+│  transcode.py        optional AV1/Opus QSV worker (batch, per segment)          │
 │                                                                                 │
 │  MediaMTX process (child)                                                       │
 │    source: rtsps+http://<temp-creds>@<camera>:443/rtsp_tunnel?...               │
@@ -125,6 +126,28 @@ HTTP Range support (seek/scrub). "Ab hier" chains consecutive segments in
 chronological order by advancing to the next (newer) segment when the player
 reports `ended`.
 
+## Optional transcoding (AV1/Opus, Intel QSV)
+
+When `TRANSCODE_ENABLED=true`, a worker thread watches for finalized `.mp4`
+segments (older than `TRANSCODE_MIN_AGE_SECONDS`) and runs FFmpeg with
+`av1_qsv` (Intel QSV) and `libopus`.
+
+- First attempt: QSV hardware decode (`-hwaccel qsv -hwaccel_output_format qsv`)
+  and QSV encode. If that fails, it retries with software decode and QSV encode.
+- Output defaults to WebM (`.webm`, AV1 + Opus) for browser playback; `mkv` and
+  `mp4` are configurable.
+- The output is written to a temporary file, validated (non-empty, exit code
+  0), and only then atomically renamed and the original `.mp4` deleted.
+- On failure the original is kept, the file is retried later, and the error is
+  exposed in `/status` and on the dashboard.
+- The UI reads all supported extensions, so both H.264 originals (before
+  transcoding) and AV1 outputs remain visible.
+
+The QSV stack is provided by the amd64 image (Jellyfin FFmpeg + Intel user-mode
+drivers). GPU access requires `/dev/dri`; the compose override
+`docker-compose.qsv.yml` handles device and group passthrough. Transcoding is
+not available on the arm64 image.
+
 ## State and files
 
 | Path | Purpose |
@@ -144,6 +167,7 @@ reports `ended`.
 | MediaMTX crashes | Supervisor restarts it with backoff; recording resumes when the source is available. |
 | Disk full | Retention loop deletes oldest segments (if `MAX_STORAGE_GB`/`MIN_FREE_GB` configured); MediaMTX may fail writes until space is available. |
 | Container restart | Worker re-authenticates (refresh token from volume), resolves camera, resumes recording. The in-flight segment may be lost. |
+| Transcoding fails (GPU/driver) | Original H.264 segment is kept; error appears in status; other recordings continue. |
 
 ## Design decisions
 
