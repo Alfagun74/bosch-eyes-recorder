@@ -6,7 +6,7 @@ LABEL org.opencontainers.image.title="Bosch Eyes Recorder" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="1.2.0"
 
-ARG TARGETARCH=amd64
+ARG TARGETARCH
 ARG MEDIAMTX_VERSION=1.21.1
 
 ENV PYTHONUNBUFFERED=1 \
@@ -19,10 +19,11 @@ ENV PYTHONUNBUFFERED=1 \
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl tzdata \
  && rm -rf /var/lib/apt/lists/* \
- && case "${TARGETARCH}" in \
-      amd64) MTX_ARCH="amd64" ;; \
-      arm64) MTX_ARCH="arm64" ;; \
-      *) echo "Nicht unterstuetzte Architektur: ${TARGETARCH} (amd64/arm64)" >&2; exit 1 ;; \
+ && ARCH="${TARGETARCH:-$(uname -m)}" \
+ && case "$ARCH" in \
+      amd64|x86_64) MTX_ARCH="amd64" ;; \
+      arm64|aarch64) MTX_ARCH="arm64" ;; \
+      *) echo "Unsupported architecture: $ARCH (amd64/arm64)" >&2; exit 1 ;; \
     esac \
  && curl -fsSL "https://github.com/bluenviron/mediamtx/releases/download/v${MEDIAMTX_VERSION}/mediamtx_v${MEDIAMTX_VERSION}_linux_${MTX_ARCH}.tar.gz" -o /tmp/mediamtx.tar.gz \
  && tar -xzf /tmp/mediamtx.tar.gz -C /usr/local/bin mediamtx \

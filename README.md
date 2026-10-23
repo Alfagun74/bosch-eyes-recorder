@@ -154,6 +154,8 @@ using the included `Dockerfile` and `captain-definition`.
 
 > The app-token deployment is asynchronous: a green action means CapRover
 > accepted the deployment. Watch the build in CapRover, then open your app URL.
+> Until the three secrets are configured, the deploy workflow is skipped with a
+> notice (CI still runs).
 
 #### 3. Set the runtime environment
 
