@@ -1,6 +1,9 @@
 services:
   bosch-recorder:
-    build: .
+    build:
+      context: .
+      args:
+        MEDIAMTX_VERSION: "${MEDIAMTX_VERSION:-1.21.1}"
     image: bosch-eyes-recorder:latest
     container_name: bosch-eyes-recorder
     restart: unless-stopped
@@ -9,12 +12,22 @@ services:
     ports:
       - "80:80"
     environment:
-      TZ: Europe/Berlin
-      RETENTION_DAYS: "7"
-      SEGMENT_MINUTES: "10"
-      HIGH_QUALITY: "false"
-      # Optional: bootstrap token; alternatively use the web UI at /login
+      TZ: "${TZ:-Europe/Berlin}"
+      RETENTION_DAYS: "${RETENTION_DAYS:-7}"
+      SEGMENT_MINUTES: "${SEGMENT_MINUTES:-10}"
+      HIGH_QUALITY: "${HIGH_QUALITY:-false}"
+      MIN_FREE_GB: "${MIN_FREE_GB:-5}"
+      MAX_STORAGE_GB: "${MAX_STORAGE_GB:-0}"
+      CONNECTION_TYPE: "${CONNECTION_TYPE:-LOCAL}"
       BOSCH_REFRESH_TOKEN: "${BOSCH_REFRESH_TOKEN:-}"
+      BOSCH_CAMERA_ID: "${BOSCH_CAMERA_ID:-}"
+      BOSCH_CAMERA_NAME: "${BOSCH_CAMERA_NAME:-}"
+      CAMERA_HOST: "${CAMERA_HOST:-}"
       WEB_PASSWORD: "${WEB_PASSWORD:-}"
     volumes:
       - ./data:/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

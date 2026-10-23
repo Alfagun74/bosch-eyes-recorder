@@ -31,6 +31,19 @@ python -m compileall -q app tools
 The test suite uses only the standard library plus `requests`. It does not
 contact Bosch or a camera.
 
+## Run with Docker Compose (recommended)
+
+The primary installation path is Docker Compose:
+
+```bash
+cp .env.example .env
+# set WEB_PASSWORD in .env
+docker compose up -d --build
+```
+
+See the main README for details. Use the host run below for fast iteration
+without rebuilding the image.
+
 ## Run locally
 
 ```bash

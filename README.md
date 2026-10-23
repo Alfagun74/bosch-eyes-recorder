@@ -26,8 +26,8 @@ recording with rolling retention (default: 7 days) in a Docker volume.
 - [Features](#features)
 - [Architecture](#architecture)
 - [Quick start](#quick-start)
-  - [Option A: CapRover + GitHub (recommended)](#option-a-caprover--github-recommended)
-  - [Option B: Docker Compose](#option-b-docker-compose)
+  - [Option A: Docker Compose (recommended)](#option-a-docker-compose-recommended)
+  - [Option B: CapRover + GitHub (alternative)](#option-b-caprover--github-alternative)
   - [Option C: Local development](#option-c-local-development)
 - [First login](#first-login)
 - [Configuration](#configuration)
@@ -125,10 +125,58 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
    Bosch proxy (stream then goes through Bosch's cloud).
 3. A browser for the one-time login.
 4. A Docker volume with enough free space (see [Storage sizing](#storage-sizing)).
+5. **Docker + Docker Compose** for the recommended installation path.
 
-### Option A: CapRover + GitHub (recommended)
+### Option A: Docker Compose (recommended)
 
-This is the "push to GitHub, CapRover builds and deploys" path.
+Docker Compose is the recommended installation for a self-hosted server: one
+checkout, one `.env` file, no external CI or CapRover required, automatic
+container restart, and the same image as every other deployment path.
+
+```bash
+git clone https://github.com/Alfagun74/bosch-eyes-recorder.git
+cd bosch-eyes-recorder
+cp .env.example .env
+# edit .env and set at least WEB_PASSWORD
+docker compose up -d --build
+```
+
+Open `http://<server-ip>/` and continue with [First login](#first-login).
+Recordings are stored in `./data/recordings/eyes/`.
+
+Useful commands:
+
+```bash
+docker compose logs -f              # app + MediaMTX logs
+docker compose down                 # stop, keep the ./data volume
+git pull && docker compose up -d --build   # update to the latest version
+docker compose up -d --force-recreate      # apply changed .env values
+```
+
+- The compose file reads `.env` automatically. `.env.example` documents the
+  common settings; all options are listed in [Configuration](#configuration).
+- If port 80 is already in use, change the host side of the `ports` mapping in
+  `docker-compose.yml` (e.g. `"8080:80"`) and open `http://<server>:8080/`.
+  The container port stays `80`.
+- Set `WEB_PASSWORD` before exposing the app to a network. Without it, the UI
+  and live stream are open to anyone who can reach the host.
+- The image is rebuilt locally on first start and downloads a pinned MediaMTX
+  release; the build machine needs Internet access.
+
+If you cannot use Compose, the equivalent command is:
+
+```bash
+docker build -t bosch-eyes-recorder .
+docker run -d --name bosch-eyes-recorder --restart unless-stopped --init \
+  -p 80:80 -v "$PWD/data:/data" --env-file .env \
+  bosch-eyes-recorder:latest
+```
+
+### Option B: CapRover + GitHub (alternative)
+
+Use this if you already run CapRover and prefer push-to-deploy. CapRover builds
+the Docker image on the server, so Docker is not required on your workstation.
+The Compose path above is the simpler default for most users.
 
 #### 1. Create the CapRover app
 
@@ -182,19 +230,6 @@ SingleKey ID login in the new tab, copy the full callback URL
 stream and the recording start automatically.
 
 See [First login](#first-login) for details and alternatives.
-
-### Option B: Docker Compose
-
-```bash
-git clone https://github.com/Alfagun74/bosch-eyes-recorder.git
-cd bosch-eyes-recorder
-
-export WEB_PASSWORD='choose-a-strong-password'
-docker compose up -d --build
-```
-
-Open `http://<server>:80/`, log in, done. Recordings are stored in
-`./data/recordings/`.
 
 ### Option C: Local development
 
@@ -438,7 +473,8 @@ tools/               optional refresh-token helper
 .github/workflows/   CI and CapRover deployment workflows
 Dockerfile           multi-arch image (Python + pinned MediaMTX)
 captain-definition   CapRover build definition
-docker-compose.yml   local compose setup
+docker-compose.yml   recommended Docker Compose setup
+.env.example         documented environment template for Compose
 ```
 
 ## License and credits

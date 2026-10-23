@@ -20,6 +20,10 @@ project follows [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Version bumped to 1.3.0.
+- **Docker Compose is now the primary documented installation method**;
+  CapRover/GitHub deployment remains available as an alternative.
+- Added `.env.example` and expanded the Compose file (pinned MediaMTX build
+  argument, more environment defaults, log rotation).
 
 ## [1.2.0] - 2026-10-23
 

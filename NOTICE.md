@@ -30,7 +30,7 @@ binary. MediaMTX handles RTSP pulling, fMP4 recording, and HLS generation.
 
 ## hls.js (Apache-2.0)
 
-`app/static/hls.min.js` is hls.js 1.5.20
+`app/static/hls.min.js` is hls.js 1.7.3
 (https://github.com/video-dev/hls.js, Apache License 2.0). The license text is
 included in `app/static/hls.js.LICENSE.txt`.
 
