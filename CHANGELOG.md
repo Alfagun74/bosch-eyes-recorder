@@ -6,6 +6,20 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Stream blieb nach abgelaufenen Kamera-Zugangsdaten dauerhaft auf 401**
+  (`bad status code: 401 (Unauthorized)`), auch nach erneutem Browser-Login.
+  Erneuerte temporaere Zugangsdaten wurden bisher nur im Arbeitsspeicher
+  gehalten und nie an MediaMTX weitergegeben; ein Re-Login aktualisierte nur
+  das OAuth-Token, nicht die Quelle des laufenden MediaMTX-Prozesses. Jetzt
+  werden bei einem Stream-Ausfall frische Zugangsdaten geholt und MediaMTX
+  neu gestartet; ein Login stoesst die Erneuerung ebenfalls an. Zusaetzlich
+  ueberlebt der Watchdog fehlerhafte Statusabfragen, ein veralteter
+  `path_ready`-Wert blockiert die Erholung nicht mehr, die MediaMTX-Config
+  wird atomar geschrieben, und `STALL_SECONDS` wird tatsaechlich ausgewertet
+  (bisher war `90` fest verdrahtet).
+
 ## [1.4.1] - 2026-10-24
 
 ### Fixed

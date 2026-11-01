@@ -84,12 +84,17 @@ restarted independently by the app; the app's HTTP server keeps running.
 Bosch's local/RTSPS credentials are short-lived ("temporary"). The app:
 
 1. requests new credentials every ~20 minutes (or on demand),
-2. caches them and only rewrites the MediaMTX source when needed (source down),
+2. hands them to MediaMTX only when needed (source down): it rewrites
+   `mediamtx.yml` atomically and restarts the supervised MediaMTX process, so
+   the new source is guaranteed to be used regardless of host file-watcher
+   semantics and any stuck source state is cleared,
 3. keeps the current stream alive as long as MediaMTX's connection persists.
 
 If the camera closes the connection (credential expiry, network drop, camera
 reboot), the watchdog notices `path_ready=false`, requests fresh credentials,
-rewrites `mediamtx.yml`, and MediaMTX reloads the source. Recording gaps are
+rewrites `mediamtx.yml`, restarts MediaMTX with them, and recording resumes.
+A browser re-login re-applies the source as well (the OAuth token alone is a
+separate layer and does not affect the stream credentials). Recording gaps are
 limited to the reconnect time.
 
 ## Recording

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import secrets
 import subprocess
 import threading
@@ -34,12 +35,16 @@ class MediaMTX:
         self.admin_password = secrets.token_urlsafe(24)
         self.api_address = cfg.mediamtx_api_addr
         self._proc: subprocess.Popen | None = None
+        self._proc_lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
-        self._state = {'running': False, 'path_ready': False, 'readers': 0,
-                       'restarts': 0, 'last_error': None, 'source_host': None,
-                       'last_config_write': None, 'recordings': 0, 'recordings_mb': 0.0}
+        self._api_session = requests.Session()
+        self._api_session.trust_env = False  # kein HTTP(S)_PROXY fuer loopback
+        self._state = {'running': False, 'path_ready': False, 'path_state_at': 0.0,
+                       'readers': 0, 'restarts': 0, 'last_error': None,
+                       'source_host': None, 'last_config_write': None,
+                       'recordings': 0, 'recordings_mb': 0.0}
 
     # ---------- Konfiguration ----------
     def _config(self, source_url: str, fingerprint: str) -> dict:
@@ -75,7 +80,15 @@ class MediaMTX:
 
     def apply_source(self, source_url: str, fingerprint: str, host: str | None) -> None:
         config = self._config(source_url, fingerprint)
-        self.config_path.write_text(json.dumps(config, indent=2), encoding='utf-8')
+        # Atomar schreiben: MediaMTX beobachtet die Datei und beendet sich bei
+        # einem halb geschriebenen (nicht parsebaren) Stand.
+        tmp = self.config_path.with_suffix('.yml.tmp')
+        tmp.write_text(json.dumps(config, indent=2), encoding='utf-8')
+        try:
+            os.chmod(tmp, 0o600)  # enthaelt temporaere Kamera-Zugangsdaten
+        except OSError:
+            pass
+        os.replace(tmp, self.config_path)
         with self._lock:
             self._state['source_host'] = host
             self._state['last_config_write'] = time.time()
@@ -99,17 +112,29 @@ class MediaMTX:
         backoff = 3
         while not self._stop.is_set():
             log.info('Starte MediaMTX.')
-            self._proc = subprocess.Popen([self.binary, str(self.config_path)],
-                                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                          text=True, encoding='utf-8', errors='replace')
+            started = time.time()
+            with self._proc_lock:
+                self._proc = subprocess.Popen([self.binary, str(self.config_path)],
+                                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                              text=True, encoding='utf-8', errors='replace')
+                proc = self._proc
             with self._lock:
                 self._state['running'] = True
                 self._state['last_error'] = None
-            threading.Thread(target=self._collect, args=(self._proc,), daemon=True).start()
+                # Ein neuer Prozess ist erst dann "ready", wenn die API es sagt.
+                self._state['path_ready'] = False
+                self._state['path_state_at'] = 0.0
+            threading.Thread(target=self._collect, args=(proc,), daemon=True).start()
             self._state_loop()
             with self._lock:
                 self._state['running'] = False
+                self._state['path_ready'] = False
+                self._state['path_state_at'] = 0.0
             self._kill()
+            # Nach einem laengeren Lauf war der Prozess offensichtlich
+            # gesund; dann sofort (kurz) neu starten statt Backoff zu erben.
+            if time.time() - started > 60:
+                backoff = 3
             if self._stop.wait(backoff):
                 return
             backoff = min(30, backoff * 2)
@@ -125,44 +150,60 @@ class MediaMTX:
 
     def _state_loop(self) -> None:
         while not self._stop.wait(5):
-            proc = self._proc
+            with self._proc_lock:
+                proc = self._proc
             if proc is None or proc.poll() is not None:
                 return
             self._refresh_path_state()
 
     def _refresh_path_state(self) -> None:
         try:
-            response = requests.get('http://' + self.api_address + '/v3/paths/get/eyes',
-                                    auth=('admin', self.admin_password), timeout=3)
+            response = self._api_session.get('http://' + self.api_address + '/v3/paths/get/eyes',
+                                             auth=('admin', self.admin_password), timeout=3)
             if response.status_code != 200:
                 return
             payload = response.json()
             with self._lock:
                 self._state['path_ready'] = bool(payload.get('ready'))
+                self._state['path_state_at'] = time.time()
                 self._state['readers'] = len(payload.get('readers') or [])
         except Exception:
             pass
 
     def _kill(self) -> None:
-        proc = self._proc
+        with self._proc_lock:
+            proc = self._proc
+            self._proc = None
         if proc and proc.poll() is None:
             proc.terminate()
             try:
                 proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 proc.kill()
-        self._proc = None
 
     # ---------- Status ----------
     def status(self) -> dict:
         with self._lock:
             state = dict(self._state)
-        files = (list(self.recordings_dir.rglob('*.mp4'))
-                 + list(self.recordings_dir.rglob('*.webm'))
-                 + list(self.recordings_dir.rglob('*.mkv')))
+        files: list[Path] = []
+        for pattern in ('*.mp4', '*.webm', '*.mkv'):
+            try:
+                files.extend(self.recordings_dir.rglob(pattern))
+            except OSError:
+                pass
+        total = 0
+        latest: tuple[float, str] | None = None
+        for path in files:
+            try:
+                stat = path.stat()
+            except OSError:  # Datei wurde waehrend des Scans geloescht.
+                continue
+            total += stat.st_size
+            if latest is None or stat.st_mtime > latest[0]:
+                latest = (stat.st_mtime, path.name)
         state['recordings'] = len(files)
-        state['recordings_mb'] = round(sum(f.stat().st_size for f in files if f.is_file()) / (1024 ** 2), 1)
-        state['latest_recording'] = max(files, key=lambda p: p.stat().st_mtime).name if files else None
+        state['recordings_mb'] = round(total / (1024 ** 2), 1)
+        state['latest_recording'] = latest[1] if latest else None
         return state
 
     def restart_with(self, source_url: str, fingerprint: str, host: str | None) -> None:

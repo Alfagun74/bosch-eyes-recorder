@@ -19,6 +19,9 @@ from .status_http import start_http_server
 from .transcode import TranscodeWorker
 
 VERSION = '1.4.1'
+# Ab diesem Alter gilt der zuletzt gemeldete path_ready-Wert als veraltet
+# (MediaMTX wird alle 5 s abgefragt; 30 s = 6 verpasste Abfragen).
+PATH_STATE_MAX_AGE = 30.0
 log = logging.getLogger('bosch-recorder')
 
 
@@ -43,6 +46,8 @@ class App:
         self.setup_event = threading.Event()
         self._status_lock = threading.Lock()
         self._target_lock = threading.Lock()
+        self._recover_lock = threading.Lock()
+        self._last_recover_at = 0.0
         self._target: tuple[str, str, str, float] | None = None
         self._storage_lock = threading.Lock()
         self._storage_cache = {'computed_at': 0.0, 'files': 0, 'mb': 0.0, 'free_gb': 0.0}
@@ -114,6 +119,31 @@ class App:
         log.info('Bosch-Login abgeschlossen; Aufnahme startet.')
         if not self._worker_started:
             self.start_worker()
+            return
+        try:
+            if not self.mtx.status().get('running'):
+                # Der Worker holt beim Start selbst eine frische Quelle.
+                return
+        except Exception:
+            pass
+        threading.Thread(target=self._resume_after_login, name='relogin', daemon=True).start()
+
+    def _resume_after_login(self) -> None:
+        """Erneuert nach einem Login die Kamera-Quelle von MediaMTX.
+
+        Ein erneuter OAuth-Login allein hilft nicht: die 401-Fehler im
+        MediaMTX-Log betreffen die separaten, kurzlebigen Kamera-Zugangsdaten
+        im generierten mediamtx.yml, nicht das Bosch-Token. Ohne diesen
+        Schritt laeuft MediaMTX weiter mit der alten, abgelaufenen Quelle.
+        """
+        try:
+            # Ein bewusster Login ist ein Reset: Bereitschafts-/Cooldown-Gates
+            # werden umgangen, damit ein haengender Zustand sicher behoben wird.
+            if self._apply_target(force=True):
+                log.info('MediaMTX mit frischen Stream-Zugangsdaten neu gestartet.')
+        except Exception as exc:
+            log.warning('Quelle nach Login konnte nicht erneuert werden: %s', exc)
+            self._update(error='Quelle nach Login: ' + type(exc).__name__)
 
     # ---------- Setup ----------
     def configure_token(self, text: str) -> None:
@@ -136,9 +166,53 @@ class App:
         log.info('Neue Stream-Zugangsdaten (Host %s, Pin %s).', host, fingerprint[:16])
         return url, fingerprint, diagnostics
 
-    def _apply_target(self) -> None:
-        url, fingerprint, diagnostics = self._get_target(force=True)
-        self.mtx.apply_source(url, fingerprint, diagnostics.get('stream_host'))
+    def _path_ready(self, state: dict) -> bool:
+        """True nur bei frisch bestaetigter, bereiter MediaMTX-Quelle.
+
+        Ein einmal gesetztes path_ready darf die Erholung nicht dauerhaft
+        blockieren: bleibt die Statusabfrage aus (Prozessneustart, API-Fehler),
+        gilt der Wert als unbekannt und die Quelle wird erneuert.
+        """
+        if not state.get('path_ready'):
+            return False
+        since = state.get('path_state_at')
+        if not since:
+            return False
+        return time.time() - float(since) < PATH_STATE_MAX_AGE
+
+    def _apply_target(self, force: bool = False) -> bool:
+        """Holt frische Kamera-Zugangsdaten und gibt sie an MediaMTX weiter.
+
+        MediaMTX liest mediamtx.yml im laufenden Betrieb normalerweise neu ein,
+        aber das haengt vom Dateiwatcher des Hosts/Volumes ab. Um die neuen
+        Zugangsdaten garantiert zu verwenden und eine festgefahrene Quelle
+        zurueckzusetzen, wird der Prozess nach dem Schreiben kontrolliert neu
+        gestartet; der Supervisor liest dann die aktualisierte Datei.
+
+        force=True umgeht Bereitschafts- und Cooldown-Pruefung (manueller
+        Login = bewusster Reset).
+
+        Rueckgabe: True, wenn MediaMTX mit neuer Quelle neu gestartet wurde.
+        """
+        with self._recover_lock:
+            state = self.mtx.status()
+            now = time.time()
+            if not force:
+                if self._path_ready(state):
+                    return False
+                if now - self._last_recover_at < 60:
+                    return False
+            # Cooldown vor dem Request setzen: auch fehlgeschlagene Versuche
+            # sollen nicht alle 30 s neue Bosch-Sessions erzeugen.
+            self._last_recover_at = now
+            url, fingerprint, diagnostics = self._get_target(force=True)
+            if not self.mtx.status().get('running'):
+                # MediaMTX ist gerade aus (z. B. waehrend eines Neustarts);
+                # der Supervisor liest die Datei beim naechsten Start.
+                self.mtx.apply_source(url, fingerprint, diagnostics.get('stream_host'))
+                return False
+            self.mtx.restart_with(url, fingerprint, diagnostics.get('stream_host'))
+            return True
 
     # ---------- Worker ----------
     def start_worker(self) -> None:
@@ -203,11 +277,22 @@ class App:
                 self.stop_event.wait(25)
 
     def _credential_loop(self) -> None:
+        """Sicherheitsnetz, falls der Watchdog nicht mehr greift.
+
+        Frueher wurden hier nur neue Zugangsdaten geholt und verworfen - sie
+        erreichten MediaMTX nie. Jetzt wird die Quelle nur dann erneuert,
+        wenn der Stream tatsaechlich steht; im Normalbetrieb bleibt die
+        laufende Kamera-Verbindung unangetastet.
+        """
         while not self.stop_event.is_set():
             if self.stop_event.wait(self.cfg.credential_refresh_seconds):
                 return
             try:
-                self._get_target(force=True)
+                state = self.mtx.status()
+                if self._path_ready(state) or not state.get('running'):
+                    continue
+                if self._apply_target():
+                    log.info('Zugangsdaten-Erneuerung: MediaMTX mit frischer Quelle neu gestartet.')
             except Exception as exc:
                 log.warning('Zugangsdaten-Erneuerung fehlgeschlagen: %s', exc)
                 self._update(error='Zugangsdaten-Erneuerung: ' + type(exc).__name__)
@@ -218,8 +303,12 @@ class App:
         while not self.stop_event.is_set():
             if self.stop_event.wait(8):
                 return
-            state = self.mtx.status()
-            if state.get('path_ready'):
+            try:
+                state = self.mtx.status()
+            except Exception as exc:  # Watchdog darf nie sterben.
+                log.warning('MediaMTX-Status nicht lesbar: %s', exc)
+                continue
+            if self._path_ready(state):
                 not_ready_since = None
                 continue
             if not state.get('running'):
@@ -229,12 +318,13 @@ class App:
             if not_ready_since is None:
                 not_ready_since = now
                 continue
-            if now - not_ready_since < 90:
+            if now - not_ready_since < max(1, self.cfg.stall_seconds):
                 continue
             log.warning('Kamera-Quelle seit %.0f s nicht bereit; aktualisiere Zugangsdaten.',
                         now - not_ready_since)
             try:
-                self._apply_target()
+                if self._apply_target():
+                    log.info('MediaMTX mit frischen Zugangsdaten neu gestartet.')
                 not_ready_since = None
             except Exception as exc:
                 log.warning('Umschalten auf neue Zugangsdaten fehlgeschlagen: %s', exc)

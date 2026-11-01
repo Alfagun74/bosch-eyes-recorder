@@ -63,6 +63,22 @@ The app renews credentials every `CREDENTIAL_REFRESH_SECONDS` and on demand.
 Frequent reconnects usually mean network issues or that Bosch revokes the
 temporary account. Check the logs; a camera reboot also drops the stream.
 
+### `bad status code: 401 (Unauthorized)` in the MediaMTX log
+
+MediaMTX uses the temporary camera credentials stored in
+`/data/state/mediamtx.yml`. When the camera rejects them (credentials expired,
+session ended, camera rebooted), MediaMTX keeps retrying with the same stale
+source URL. Up to version 1.4.1 a browser re-login only renews the OAuth token
+and does not update the stream credentials, so the 401 loop can persist
+indefinitely and recording stops.
+
+- Restart the container: the worker requests fresh camera credentials on
+  startup and recording resumes.
+- If the 401 loop returns after a while, check `/status` and the unfiltered
+  logs for watchdog messages (`Kamera-Quelle seit ... nicht bereit`).
+- Newer versions refresh the credentials automatically when the source is not
+  ready and additionally re-apply them after a login.
+
 ## Video and audio
 
 - **Black player / no image**: HLS may take a few seconds. Reload the page; if
