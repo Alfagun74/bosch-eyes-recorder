@@ -1,4 +1,4 @@
-FROM python:3.12-slim-bookworm
+FROM python:3.15-slim-bookworm
 
 LABEL org.opencontainers.image.title="Bosch Eyes Recorder" \
       org.opencontainers.image.description="Open-source recorder and web UI (live view + rolling recordings) for Bosch Eyes Gen1 cameras" \
